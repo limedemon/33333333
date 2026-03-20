@@ -52,7 +52,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 from PIL import Image, ImageOps, ImageDraw
 
 # === КОНФИГУРАЦИЯ СЛОТОВ ===
-TOKEN = "8770327861:AAEPgHBTjpoqhLsl8f8KMoyzo1xrtWjeyrM"
+TOKEN = "8770327861:AAHxzr4OK5fJTQnRFdwMYF_V__Fw95RjhxY"
 
 try:
     MAIN_BOT_ID = int(TOKEN.split(":")[0])
