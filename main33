@@ -52,7 +52,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 from PIL import Image, ImageOps, ImageDraw
 
 # === КОНФИГУРАЦИЯ СЛОТОВ ===
-TOKEN = "8770327861:AAHxzr4OK5fJTQnRFdwMYF_V__Fw95RjhxY"
+TOKEN = "8770327861:AAEPgHBTjpoqhLsl8f8KMoyzo1xrtWjeyrM"
 
 try:
     MAIN_BOT_ID = int(TOKEN.split(":")[0])
@@ -66,16 +66,16 @@ COOLDOWN_SECONDS = 600  # 10 минут
 
 UPDATE_LOG_TEXT = (
     "<b>🚀 Глобальное обновление системы!\n\n"
+    "• 📂 ВОССТАНОВЛЕНИЕ БД: Добавлена админ-команда /backdata для загрузки бэкапа базы данных (.db)!\n"
     "• 🗡 ТИПЫ АТАК: Добавлены новые атаки! 🛜AOE🛜 (бьет всех), 💥SPLASH💥 (бьет двоих) и 🔥FIRE🔥 (поджигает врага)!\n"
     "• 🛍 НОВЫЙ МАГАЗИН: Добавлены мега-паки (вплоть до х50) и паки со 100% шансом на Легу, Мифик и Божественную!\n"
     "• 🏅 РАНГИ: В профиле теперь отображается ваше звание от Новичка до Мастера.\n"
     "• 🕵️‍♂️ ПРОСМОТР ЭКИПИРОВКИ: Ответьте на сообщение игрока командой /equip, чтобы посмотреть его колоду.\n"
-    "• 🛡 АДМИН-ПАНЕЛЬ: Добавлены команды /ban, /unban, /getmoney и /gettrophies с системой логов.\n"
+    "• 🛡 АДМИН-ПАНЕЛЬ: Команды /ban, /unban, /getmoney и /gettrophies с системой логов.\n"
     "• 🏆 ЧЕСТНЫЕ ТОПЫ: Админы скрыты из списков лидеров.\n"
     "• ⏰ РАСПИСАНИЕ МАГАЗИНА: Магазин паков обновляется строго по расписанию по МСК!\n"
     "• 🎲 СИСТЕМА ГАРАНТА (PITY): Пороги переработаны.\n"
-    "• ⚔️ АНТИ-АБУЗ: Запрещено участвовать в нескольких боях одновременно.\n"
-    "• 🤖 БОЙ С БОТОМ: В поиске боя можно сыграть с ботом.</b>"
+    "• ⚔️ АНТИ-АБУЗ: Запрещено участвовать в нескольких боях одновременно.</b>"
 )
 
 # Словарь цветов рамок для редкостей
@@ -513,7 +513,6 @@ async def spawn_pack_shop(bot: Bot):
     users = cursor.fetchall()
     conn.close()
     
-    # Фильтруем каналы из рассылки магазина (ОТПРАВЛЯЕМ ТОЛЬКО В ЛС И ГРУППЫ)
     targets = set([c[0] for c in chats if c[1] != 'channel'] + [u[0] for u in users])
     
     if bot.id in ACTIVE_PACK_SHOP:
@@ -578,6 +577,7 @@ async def process_buy_pack(callback: CallbackQuery, bot: Bot):
         
     p_data = PACKS_CONFIG[p_id]
     user_id = callback.from_user.id
+    mention = f"@{callback.from_user.username}" if callback.from_user.username else html.escape(callback.from_user.first_name)
     
     conn = get_db_connection(bot.id)
     cursor = conn.cursor()
@@ -607,7 +607,7 @@ async def process_buy_pack(callback: CallbackQuery, bot: Bot):
                 key = (c[2], c[7], c[4], c[5], c[6], c[8] if len(c)>8 else '')
                 counts[key] = counts.get(key, 0) + 1
                 
-            lines = [f"🎉 <b>Ты открыл {p_data['name']} и получил:</b>\n"]
+            lines = [f"🎉 <b>{mention} открыл {p_data['name']} и получил:</b>\n"]
             for (name, element, rarity, dmg, hp, atype), cnt in counts.items():
                 elem_str = fmt_el(element, atype)
                 lines.append(f"• <b>{cnt}x</b> {html.escape(name)} ({elem_str})\n  💎 {rarity} | ⚔️ {dmg} | ❤️ {hp}")
@@ -617,7 +617,7 @@ async def process_buy_pack(callback: CallbackQuery, bot: Bot):
                 msg_text = msg_text[:3900] + "\n\n<i>...и множество других карт!</i>"
             await smart_reply(callback.message, msg_text)
         else:
-            lines = [f"🎉 <b>Ты открыл {p_data['name']} и получил:</b>\n"]
+            lines = [f"🎉 <b>{mention} открыл {p_data['name']} и получил:</b>\n"]
             for idx, c in enumerate(pulled_cards, 1):
                 atype = c[8] if len(c)>8 else ''
                 elem_str = fmt_el(c[7], atype)
@@ -638,6 +638,9 @@ class AddCardState(StatesGroup):
     waiting_for_attack_type = State()
     waiting_for_damage = State()
     waiting_for_health = State()
+
+class RestoreDBState(StatesGroup):
+    waiting_for_file = State()
 
 def get_inline_rarities_kb():
     kb, row = [], []
@@ -706,7 +709,7 @@ async def cmd_addadmin(message: Message, bot: Bot, state: FSMContext):
     target_id = get_user_id_by_input(args[1], bot.id)
     if not target_id: return await smart_reply(message, "Пользователь не найден в базе данных этого бота.")
     conn = get_db_connection(bot.id)
-    conn.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?, ?)", (target_id,))
+    conn.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (target_id,))
     conn.commit()
     conn.close()
     await smart_reply(message, f"✅ Пользователь {args[1]} назначен администратором!")
@@ -821,6 +824,36 @@ async def cmd_events_space(message: Message, bot: Bot, state: FSMContext):
         text = f"⏳ Активирован эвент СКОРОСТИ!\nВремя перезарядки карт уменьшено в {multiplier}x на {minutes} минут!"
         await smart_reply(message, "✅ Эвент запущен. Начинаю рассылку...")
         asyncio.create_task(broadcast(bot, text))
+
+async def cmd_backdata_start(message: Message, bot: Bot, state: FSMContext):
+    await state.clear()
+    if not is_admin(message.from_user.id, bot.id): return
+    await message.answer("<b>📂 Отправь мне файл базы данных (.db) следующим сообщением для восстановления:</b>", parse_mode="HTML")
+    await state.set_state(RestoreDBState.waiting_for_file)
+
+async def process_backdata_file(message: Message, state: FSMContext, bot: Bot):
+    if not message.document or not message.document.file_name.endswith('.db'):
+        await message.answer("<b>❌ Это не файл .db! Операция отменена.</b>", parse_mode="HTML")
+        return await state.clear()
+        
+    db_path = get_db_path(bot.id)
+    wal_path = db_path + "-wal"
+    shm_path = db_path + "-shm"
+    
+    try:
+        file = await bot.get_file(message.document.file_id)
+        await bot.download_file(file.file_path, destination=db_path)
+        
+        # Удаляем кэш SQLite чтобы избежать конфликтов после замены файла
+        if os.path.exists(wal_path): os.remove(wal_path)
+        if os.path.exists(shm_path): os.remove(shm_path)
+        
+        await message.answer("<b>✅ База данных успешно загружена и применена!</b>", parse_mode="HTML")
+        await notify_admins(bot, f"Администратор @{message.from_user.username} восстановил базу данных из резервной копии.")
+    except Exception as e:
+        await message.answer(f"<b>❌ Ошибка при восстановлении БД: {e}</b>", parse_mode="HTML")
+    finally:
+        await state.clear()
 
 # === СОЗДАНИЕ КАРТЫ (FSM) ===
 async def start_add_card(message: Message, state: FSMContext, bot: Bot):
@@ -992,6 +1025,7 @@ async def cmd_help(message: Message, bot: Bot, state: FSMContext):
     admin_text = (
         "\n👑 Для администраторов:\n"
         "• /goshop (или /обновитьмагазин) — Обновить магазин паков\n"
+        "• /backdata — Загрузить бэкап базы данных (.db)\n"
         "• /ban [id/@] — Навсегда забанить игрока\n"
         "• /unban (или /разбан) [id/@] — Разбанить игрока\n"
         "• /getmoney [число] [id/@] — Выдать монеты\n"
@@ -1642,7 +1676,6 @@ async def run_battle_engine_core(bot: Bot, chat_id: int, team1: list, team2: lis
         
         turn = 0
         while True:
-            # Очистка мертвых в начале хода
             team1 = [c for c in team1 if c['hp'] > 0]
             team2 = [c for c in team2 if c['hp'] > 0]
             
@@ -1655,14 +1688,12 @@ async def run_battle_engine_core(bot: Bot, chat_id: int, team1: list, team2: lis
                 c['is_attacker'] = False
                 c['damage_taken'] = 0
                 
-            # Урон от огня (Срабатывает в начале хода)
             for c in team1 + team2:
                 if c.get('on_fire', 0) > 0:
                     c['hp'] -= c['on_fire']
                     c['damage_taken'] += c['on_fire']
                     c['on_fire'] = 0
 
-            # Кто выжил после ожогов, тот атакует
             alive_t1 = [c for c in team1 if c['hp'] > 0]
             alive_t2 = [c for c in team2 if c['hp'] > 0]
             
@@ -1688,9 +1719,8 @@ async def run_battle_engine_core(bot: Bot, chat_id: int, team1: list, team2: lis
                     defender['damage_taken'] += dmg
                     
                     if atype == '🔥FIRE🔥':
-                        defender['on_fire'] = attacker['dmg'] # Поджог на урон атаки
+                        defender['on_fire'] = attacker['dmg']
             
-            # Отображаем результаты текущего хода
             new_status = render_status(team1, team2, turn)
             for m in msgs:
                 try: await m.edit_text(new_status, parse_mode="HTML")
@@ -1797,8 +1827,11 @@ async def run_bot(token: str, admin_id: int, is_startup: bool = False):
     dp.message.register(cmd_events, Command("luckevent", "cooldownevent", "эвентудачи", "эвентскорости"))
     dp.message.register(cmd_events_space, F.text.startswith("/cooldown event ") | F.text.startswith("/эвентскорости "))
     dp.message.register(cmd_goshop, Command("goshop", "обновитьмагазин"))
+    dp.message.register(cmd_backdata_start, Command("backdata"))
     
-    # 2. Машина состояний создания карты
+    # 2. Машина состояний 
+    dp.message.register(process_backdata_file, RestoreDBState.waiting_for_file, F.chat.type == "private")
+    
     dp.message.register(start_add_card, F.text == "Добавить карту", StateFilter(None), F.chat.type == "private")
     dp.message.register(cancel_action, F.text == "Отмена", F.chat.type == "private")
     dp.message.register(process_photo, AddCardState.waiting_for_photo, F.photo, F.chat.type == "private")
